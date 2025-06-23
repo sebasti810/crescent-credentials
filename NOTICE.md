@@ -514,3 +514,19 @@ https://github.com/privacy-scaling-explorations/halo2curves/blob/b6fa078aa36d04d
 ### Additional Attributions
 None
 
+---
+
+### Component
+NOPE: Strengthening domain authentication with zero-knowledge
+https://github.com/PepperSieve/nope
+Path: circuit_setup/circuits-mdl/nope 
+Note: Using the ECDSA-P256 and SHA-256 circuits unmodified
+Copied at commit 08567b93f83798ce339da591f0ae73937d87db66
+
+### Open Source License/Copyright Notice
+UNLICENSE 
+https://github.com/PepperSieve/nope/blob/master/UNLICENSE
+
+### Additional Attributions
+Zachary DeStefano (mathmasterzach)
+
