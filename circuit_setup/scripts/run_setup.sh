@@ -1,248 +1,429 @@
+#!/usr/bin/bash
+#
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
-
-#!/usr/bin/bash
+#
 
 set -e
-
-CURVE=bn128
-
-# Argument NAME is the name of one of the subdirectories in inputs
-NAME=$1
-
-if [[ "$NAME" = "" ]] ;
-then
-    echo "Usage: $0 <name of directory in inputs>"
-    echo "Must be run from scripts/"
-    echo "E.g.: $0 rs256" 
-    exit -1
-fi
-
-# assume we're in scripts dir
-cd ..
-ROOT_DIR=`pwd`
-
-OUTPUTS_DIR=${ROOT_DIR}/generated_files/$NAME
-CIRCOM_DIR=${OUTPUTS_DIR}/circom
-INPUTS_DIR=${ROOT_DIR}/inputs/$NAME
-COPY_DEST=${ROOT_DIR}/../creds/test-vectors/$NAME
-LOG_FILE=${OUTPUTS_DIR}/${NAME}.log
-
-if [ ! -f ${INPUTS_DIR}/config.json ]; then
-    echo "${INPUTS_DIR}/config.json is not found, aborting"
-    exit -1 
-fi
-
-# Determine the credential type, JWT or mDL
-CREDTYPE_REGEX="\"credtype\": \"([a-z]+)\""
-if [[ `cat ${INPUTS_DIR}/config.json` =~ $CREDTYPE_REGEX ]]; then
-    CREDTYPE="${BASH_REMATCH[1]}"
-    echo "Credential type read from config.json: $CREDTYPE"
-else
-    CREDTYPE="jwt"
-    echo "Credential type not found in config.json, assuming JWT"
-fi
-
-if [ $CREDTYPE == 'mdl' ]; then 
-    CIRCOM_SRC_DIR="${ROOT_DIR}/circuits-mdl"
-else
-    CIRCOM_SRC_DIR="${ROOT_DIR}/circuits"
-fi
-
-# Replace linux symlink with junction if on Windows
-# There is a scenario where the symlink is broken on Windows, but then copied to the Ubuntu Docker container.
-# In this case, we need to remove the broken symlink and create a new one.
-if [ -f "${CIRCOM_SRC_DIR}/circomlib" ]; then
-    echo "Detected broken symlink at ${CIRCOM_SRC_DIR}/circomlib"
-    rm -f "${CIRCOM_SRC_DIR}/circomlib"
-    if [[ "$OS" == "Windows_NT" || "$(uname -o 2>/dev/null)" == "Msys" ]]; then
-        echo "Creating Windows junction..."
-        cmd //c "mklink /J $(cygpath -wa "$CIRCOM_SRC_DIR"/circomlib) $(cygpath -wa "${ROOT_DIR}/circuits/circomlib")"
-    else
-        echo "Creating Linux symlink..."
-        ln -s "${ROOT_DIR}/circuits/circomlib" "${CIRCOM_SRC_DIR}/circomlib"
-fi
-fi
+set -o pipefail
+shopt -s extglob
 
 
-# Determine if the credential should be device bound
-DEVICE_BOUND_REGEX="\"device_bound\": ([a-z]+)"
-if [[ `cat ${INPUTS_DIR}/config.json` =~ $DEVICE_BOUND_REGEX ]]; then
-    if [ "${BASH_REMATCH[1]}" = "true" ]; then  
-        DEVICE_BOUND=1 
-    else
-        DEVICE_BOUND=0
+readonly CURVE=bn128
+
+
+main() {
+    usage "$@"
+    setup
+    generate_keys
+    compile_circuit
+    generate_mdl
+    copy_artifacts
+    prune
+}
+
+
+###############################################################################
+#   Process command line arguments
+#   Display usage information if arguments are missing or invalid
+###############################################################################
+usage() { 
+
+    readonly SCRIPT_NAME="${0##*/}"
+    readonly NAME=$1
+    readonly PRUNE=$([[ "$2" == "--prune" ]] && echo true || echo "")
+
+    if [[ -z "$NAME" || "$NAME" == "--prune" ]]; then
+        echo
+        echo -e "Usage: $SCRIPT_NAME <name of directory in inputs> [--prune]"
+        echo
+        echo "  <name>     Required. Name of the subdirectory under 'inputs/'."
+        echo
+        echo "  --prune    Optional. Cleans up intermediate artifacts after building."
+        echo
+        echo "             The subsequent run will take longer as it will recompile the circuit."
+        echo
+        echo "Example:"
+        echo "  $0 rs256 --prune"
+        echo 
+        echo "Available inputs:"
+        for dir in "../inputs"/*/; do
+            echo "  - $(basename "$dir")"
+        done
+        exit 2
     fi
-else
-    DEVICE_BOUND=0
-fi
-echo "Credential is device bound: $DEVICE_BOUND"
 
-# Create the output directory if not there.
-mkdir $OUTPUTS_DIR 2>/dev/null || true
-mkdir $CIRCOM_DIR 2>/dev/null  || true
+}
 
-# delete the LOG_FILE if it exists (otherwise we'll be parsing old data when setting up the files)
-if [ -f ${LOG_FILE} ]; then
-    rm ${LOG_FILE}
-fi
-touch ${LOG_FILE}
+###############################################################################
+#   Set up the environment and paths
+#   Read the config.json file
+#   Create the output directory and log file
+#   Copy circom files to the instance's circom folder
+###############################################################################
+setup() {
+    # trap 'error "Unexpected error at line $LINENO in command: $BASH_COMMAND" "$?"' ERR
 
-# For JWTs, we create sample issuer keys and a token
-ALG_REGEX="\"alg\": \"([A-Z0-9]+)\""
-if [ ${CREDTYPE} == 'jwt' ] && ([ ! -f ${INPUTS_DIR}/issuer.pub ] || [ ! -f ${INPUTS_DIR}/issuer.prv ] || [ ! -f ${INPUTS_DIR}/token.jwt ]); then
-    rm ${INPUTS_DIR}/issuer.pub ${INPUTS_DIR}/issuer.prv ${INPUTS_DIR}/token.jwt 2>/dev/null && true 
+    # Ensure this script runs from its own directory.
+    # All paths are relative to this directory so this script can be run from anywhere.
+    cd "$(dirname "${BASH_SOURCE[0]}")"
 
-    if [[ `cat ${INPUTS_DIR}/config.json` =~ $ALG_REGEX ]]; then
-        ALG="${BASH_REMATCH[1]}"
-        echo "Creating sample keys and token for algorithm $ALG"
-    else
-        echo "Error: algorithm not found in config.json"
-        exit 1
+    readonly SCRIPTS_DIR=$(pwd)
+    readonly ROOT_DIR=$(realpath "$SCRIPTS_DIR"/..)
+    readonly OUTPUTS_DIR=${ROOT_DIR}/generated_files/$NAME
+    readonly INPUTS_DIR=${ROOT_DIR}/inputs/$NAME
+    readonly COPY_DEST=$(realpath "${ROOT_DIR}/../creds/test-vectors/$NAME")
+    readonly CIRCOM_DIR=${OUTPUTS_DIR}/circom
+    readonly LOG_FILE=${OUTPUTS_DIR}/${NAME}.log
+    readonly CONFIG_FILE=${INPUTS_DIR}/config.json
+
+    cd "$ROOT_DIR"
+
+    fix_symlink "${ROOT_DIR}/circuits-mdl/circomlib" "${ROOT_DIR}/circuits/circomlib"
+
+    assert_path "$CONFIG_FILE" "$INPUTS_DIR"/claims.json "$INPUTS_DIR"/proof_spec.json
+
+    declare -g -A CONFIG 
+    CONFIG[alg]=$(json_get "$CONFIG_FILE" alg)
+    CONFIG[credtype]=$(json_get "$CONFIG_FILE" credtype); : "${CONFIG[credtype]:=jwt}"
+    CONFIG[device_bound]=$([[ $(json_get "$CONFIG_FILE" device_bound) == "true" ]] && echo 1 || echo 0)
+    readonly -n CONFIG
+
+    if [[ -z ${CONFIG[alg]} ]]; then
+        error "Algorithm (alg) not found in config.json."
     fi
-    python3 scripts/jwk_gen.py ${ALG} ${INPUTS_DIR}/issuer.prv ${INPUTS_DIR}/issuer.pub
-    if [ $DEVICE_BOUND ]; then
-        echo "Creating device public key"
-        python3 scripts/jwk_gen.py ES256 ${INPUTS_DIR}/device.prv ${INPUTS_DIR}/device.pub
-        python3 scripts/jwt_sign.py ${INPUTS_DIR}/claims.json ${INPUTS_DIR}/issuer.prv  ${INPUTS_DIR}/token.jwt ${INPUTS_DIR}/device.pub
+
+    echo "┌─────────────────────────────────────────────┐"
+    echo "│ Credential type:        ${CONFIG[credtype]}"
+    echo "│ Credential algorithm:   ${CONFIG[alg]}"
+    echo "│ Device bound:           ${CONFIG[device_bound]}"
+    echo "└─────────────────────────────────────────────┘"
+
+
+    if [[ ${CONFIG[credtype]} == "mdl" ]]; then
+        readonly CIRCOM_SRC_DIR="${ROOT_DIR}/circuits-mdl"
     else
-        python3 scripts/jwt_sign.py ${INPUTS_DIR}/claims.json ${INPUTS_DIR}/issuer.prv  ${INPUTS_DIR}/token.jwt
+        readonly CIRCOM_SRC_DIR="${ROOT_DIR}/circuits"
     fi
-elif [ ${CREDTYPE} == 'mdl' ] && ([ ! -f ${INPUTS_DIR}/device.prv ] || [ ! -f ${INPUTS_DIR}/issuer.prv ] || [ ! -f ${INPUTS_DIR}/issuer.pub ] || [ ! -f ${INPUTS_DIR}/issuer_certs.pem ] || [ ! -f ${INPUTS_DIR}/mdl.cbor ]); then
-    echo "Creating sample issuer keys and mDL"
-    rm ${INPUTS_DIR}/device.prv ${INPUTS_DIR}/issuer.prv ${INPUTS_DIR}/issuer.pub ${INPUTS_DIR}/issuer_certs.pem ${INPUTS_DIR}/mdl.org ${OUTPUTS_DIR}/issuer.pub 2>/dev/null && true         
 
-    if [[ `cat ${INPUTS_DIR}/config.json` =~ $ALG_REGEX ]]; then
-        ALG="${BASH_REMATCH[1]}"
-        echo "Creating sample device/issuer keys and mdl for algorithm $ALG"
-    else
-        echo "Error: algorithm not found in config.json"
-        exit 1
+    if [ ! -f "${CIRCOM_SRC_DIR}/circomlib/package.json" ]; then
+        error "Circomlib not found. Run 'git submodule update --init --recursive' to get it."
     fi
-    cd ${ROOT_DIR}/scripts
-    ./gen_mdl_device_key.sh
-    ./gen_x509_cert_chain.sh
-    cd ${ROOT_DIR}
-fi
 
-# Check that circomlib is present
-if [ ! -f ${CIRCOM_SRC_DIR}/circomlib/README.md ]; then
-    echo "Circomlib not found.  Run 'git submodule update --init --recursive' to get it."
-    exit -1 
-fi
+    mkdir -p "$OUTPUTS_DIR" "$CIRCOM_DIR"
+    : > "$LOG_FILE"
 
-echo "- Generating ${NAME}_main.circom..."
+    cp -r -L "${CIRCOM_SRC_DIR}"/* "${CIRCOM_DIR}/"
+}
 
-# Generate the circom main file.  
-if [ ${CREDTYPE} == 'mdl' ]; then
-    python3 scripts/prepare_mdl_setup.py ${INPUTS_DIR}/config.json ${CIRCOM_DIR}/main.circom
-else
-    python3 scripts/prepare_setup.py ${INPUTS_DIR}/config.json ${CIRCOM_DIR}/main.circom
-fi
+###############################################################################
+#   Create issuer keys, device keys, certs, and tokens
+###############################################################################
+generate_keys() {
+    cd "$INPUTS_DIR"
 
-echo "- Compiling main.circom..."
-echo -e "\n=== circom output start ===" >> ${LOG_FILE}
+    local jwt_files=(issuer.prv issuer.pub token.jwt claims.json )
+    local jwt_db_files=("${jwt_files[@]}" device.prv device.pub)
+    local mdl_files=(issuer.prv issuer.pub device.prv device.pub issuer_certs.pem)
 
+    if [[ ${CONFIG[credtype]} == "jwt" ]]; then
 
-# Copy the circom files we need to the instance's circom folder.
-cp -r -L ${CIRCOM_SRC_DIR}/* ${CIRCOM_DIR}/
+        local -r scripts_dir=$(relative_path "${SCRIPTS_DIR}")
 
-# Compile the circom circuit.  First check if the hash of the circom files has changed, only re-compile if so. To force a re-build remove circom_files.sha256
-cd $CIRCOM_DIR
-echo "Using Circom WASM witness generation" >> ${LOG_FILE}
-circom main.circom --r1cs --wasm --O2 --sym --prime ${CURVE} | awk -v start=2 -v end=9 'NR>=start && NR<=end' >> ${LOG_FILE}
-mv main.r1cs main_c.r1cs
-mv main_c.r1cs ${OUTPUTS_DIR}
+        if [[ ${CONFIG[device_bound]} == 1 ]] && files_changed "${jwt_db_files[@]}"; then
+            echo "Creating issuer and device keys and JWT"
+            python3 "${scripts_dir}"/jwk_gen.py "${CONFIG[alg]}" issuer.prv issuer.pub
+            python3 "${scripts_dir}"/jwk_gen.py ES256 device.prv device.pub
+            python3 "${scripts_dir}"/jwt_sign.py claims.json issuer.prv token.jwt device.pub
+            set_hash "${jwt_db_files[@]}"
 
-cd ${ROOT_DIR}
+        elif [[ ${CONFIG[device_bound]} == 0 ]] && files_changed "${jwt_files[@]}"; then
+            echo "Creating issuer keys and JWT"
+            python3 "${scripts_dir}"/jwk_gen.py "${CONFIG[alg]}" issuer.prv issuer.pub
+            python3 "${scripts_dir}"/jwt_sign.py claims.json issuer.prv token.jwt;
+            set_hash "${jwt_files[@]}"
 
-echo "=== circom output end ===" >> ${LOG_FILE}
+        else 
+            green "Using existing keys and token"
+        fi
 
-# Read the number of public inputs from $NAME.log
-# there is a line of the form "public inputs: NUM_PUBLIC_INPUTS". parse out NUM_PUBLIC_INPUTS into a variable
-NUM_PUBLIC_INPUTS=$(grep -m 1 "public inputs:" "$LOG_FILE" | awk '{print $3}')
-NUM_PUBLIC_OUTPUTS=$(grep -m 1 "public outputs:" "$LOG_FILE" | awk '{print $3}')
-# for mDL, we need to add the device public key to the number of public inputs
-if [ "${CREDTYPE}" == "mdl" ] && [ "${DEVICE_BOUND}" == "1" ]; then
-    echo "Device bound mDL detected, adding device public key to public inputs"
-    NUM_PUBLIC_INPUTS=$((NUM_PUBLIC_INPUTS + 2))
-fi
-NUM_PUBLIC_IOS=$(($NUM_PUBLIC_INPUTS + $NUM_PUBLIC_OUTPUTS))
-echo "Number of public inputs: $NUM_PUBLIC_INPUTS"
-echo "Number of public outputs: $NUM_PUBLIC_OUTPUTS"
-echo "Total number of public I/Os: $NUM_PUBLIC_IOS"   
-
-# clean up the main.sym file as follows. Each entry is of the form #s, #w, #c, name as described in https://docs.circom.io/circom-language/formats/sym/
-awk -v max="$NUM_PUBLIC_IOS" -F ',' '$2 != -1 && $2 <= max {split($4, parts, "."); printf "%s,%s\n", parts[2], $2}' "${CIRCOM_DIR}/main.sym" > "${CIRCOM_DIR}/io_locations.sym"
-
-if [ ${CREDTYPE} == 'mdl' ]; then
-    echo "=== Generating mDL ==="
-    # Create the prover inputs (TODO: now that this has been ported to rust, do it in the library like for the JWT case)
-    PROVER_INPUTS_FILE=${OUTPUTS_DIR}/prover_inputs.json
-    PROVER_AUX_FILE=${OUTPUTS_DIR}/prover_aux.json
-    MDL_FILE=${INPUTS_DIR}/mdl.cbor
-    CONFIG_FILE=${INPUTS_DIR}/config.json
-    CLAIMS_FILE=${INPUTS_DIR}/claims.json
-    DEVICE_PRIV_KEY_FILE=${INPUTS_DIR}/device.prv
-    ISSUER_PRIV_KEY_FILE=${INPUTS_DIR}/issuer.prv
-    ISSUER_CERTS_FILE=${INPUTS_DIR}/issuer_certs.pem
-    ISSUER_KEY_FILE=${OUTPUTS_DIR}/issuer.pub
+    elif [[ ${CONFIG[credtype]} == 'mdl'  ]]; then 
     
-    cd ${ROOT_DIR}/mdl-tools
-    echo "Current dir: `pwd`"
+        if files_changed "${mdl_files[@]}"; then
+            echo "Creating sample issuer keys and mDL"
+            rm -f ./!(*.json) 
+            echo "Creating sample device/issuer keys and mdl for algorithm ${CONFIG[alg]}"
+            "$SCRIPTS_DIR"/gen_mdl_device_key.sh
+            "$SCRIPTS_DIR"/gen_x509_cert_chain.sh
+            set_hash "${mdl_files[@]}"
+        else 
+            green "Using existing keys"
+        fi
 
-    # generate the mDL
-    cargo run --release --bin mdl-gen -- --claims ${CLAIMS_FILE} --device_priv_key ${DEVICE_PRIV_KEY_FILE} --issuer_private_key ${ISSUER_PRIV_KEY_FILE} --issuer_x5chain ${ISSUER_CERTS_FILE} --output ${MDL_FILE} 2>> ${LOG_FILE}
-    if [ $? -ne 0 ]; then
-        echo "Error running mdl-gen"
-        exit 1
     fi
+
+    cd "$ROOT_DIR"
+}
+
+###############################################################################
+#   Generate circom main r1cs file
+#   Extract the number of public inputs and outputs into io_locations.sym
+###############################################################################
+compile_circuit() {
+    local circuit_inputs=(
+        "${INPUTS_DIR}/config.json"
+        "${CIRCOM_SRC_DIR}/main_header_${CONFIG[alg],,}.circom.template"
+        "${CIRCOM_DIR}/io_locations.sym"
+        "${CIRCOM_DIR}/main.circom"
+    )
+    # Find and append all .circom files under ${CIRCOM_DIR}
+    while IFS= read -r -d '' file; do
+        circuit_inputs+=("$file")
+    done < <(find "${CIRCOM_DIR}" -type f -name '*.circom' -print0)
+
+    if ! files_changed "${circuit_inputs[@]}"; then
+        green "No changes in circuit inputs, skipping compilation."
+        return 0
+    fi
+
+    echo "- Generating ${NAME}_main.circom..."
+
+    if [ "${CONFIG[credtype]}" == 'mdl' ]; then
+        python3 scripts/prepare_mdl_setup.py "${INPUTS_DIR}/config.json" "${CIRCOM_DIR}/main.circom"
+    else
+        python3 scripts/prepare_setup.py "${INPUTS_DIR}/config.json" "${CIRCOM_DIR}/main.circom"
+    fi
+
+    cd "$CIRCOM_DIR"
+
+    echo "- Compiling main.circom..."
+    log "=== circom output start ==="
+    circom main.circom --r1cs --wasm --O2 --sym --prime ${CURVE} | awk -v start=2 -v end=9 'NR>=start && NR<=end' >> "${LOG_FILE}"
+    log "=== circom output end ===" 
+    mv main.r1cs "${OUTPUTS_DIR}"/main_c.r1cs
+
+    NUM_PUBLIC_INPUTS=$(grep -m 1 "public inputs:" "$LOG_FILE" | awk '{print $3}')
+    NUM_PUBLIC_OUTPUTS=$(grep -m 1 "public outputs:" "$LOG_FILE" | awk '{print $3}')
+    if [ "${CONFIG[credtype]}" == "mdl" ] && [ "${CONFIG[device_bound]}" == "1" ]; then
+        echo "Device bound mDL detected, adding device public key to public inputs"
+        NUM_PUBLIC_INPUTS=$((NUM_PUBLIC_INPUTS + 2))
+    fi
+    NUM_PUBLIC_IOS=$((NUM_PUBLIC_INPUTS + NUM_PUBLIC_OUTPUTS))
+    echo "Number of public inputs: $NUM_PUBLIC_INPUTS"
+    echo "Number of public outputs: $NUM_PUBLIC_OUTPUTS"
+    echo "Total number of public I/Os: $NUM_PUBLIC_IOS"
+
+    awk -v max="$NUM_PUBLIC_IOS" -F ',' '$2 != -1 && $2 <= max {split($4, parts, "."); printf "%s,%s\n", parts[2], $2}' "${CIRCOM_DIR}/main.sym" > "${CIRCOM_DIR}/io_locations.sym"
+
+    set_hash "${circuit_inputs[@]}"
+
+    cd "${ROOT_DIR}"
+}
+
+###############################################################################
+#   Generate mdl and prover inputs
+#   Does nothing if cred type is jwt
+###############################################################################
+generate_mdl() {
+    if [ "${CONFIG[credtype]}" == 'mdl' ]; then
+
+        PROVER_INPUTS_FILE=${OUTPUTS_DIR}/prover_inputs.json
+        PROVER_AUX_FILE=${OUTPUTS_DIR}/prover_aux.json
+
+        cd "${INPUTS_DIR}"
+        if ! files_changed mdl.cbor claims.json device.prv issuer.prv issuer_certs.pem "$(relative_path "${OUTPUTS_DIR}/prover_inputs.json")"; then
+            green "No changes in mDL inputs, skipping generation."
+            return 0
+        fi
+
+        log "=== Generating mDL ==="
+        local mdl_file=${INPUTS_DIR}/mdl.cbor
+        local claims_file=${INPUTS_DIR}/claims.json
+        local device_priv_key_file=${INPUTS_DIR}/device.prv
+        local issuer_priv_key_file=${INPUTS_DIR}/issuer.prv
+        local issuer_certs_file=${INPUTS_DIR}/issuer_certs.pem
+
+        cd "${ROOT_DIR}/mdl-tools"
+
+        if ! cargo run --release --bin mdl-gen -- --claims "${claims_file}" --device_priv_key "${device_priv_key_file}" --issuer_private_key "${issuer_priv_key_file}" --issuer_x5chain "${issuer_certs_file}" --output "${mdl_file}" 2>> "${LOG_FILE}"; then
+            error "Error running mdl-gen"
+        fi
+
+        if ! cargo run --release --bin prepare-prover-input -- --config "${CONFIG_FILE}" --mdl "${mdl_file}" --prover_inputs "${PROVER_INPUTS_FILE}" --prover_aux "${PROVER_AUX_FILE}" 2>> "${LOG_FILE}"; then
+            error "Error running prepare_prover_input"
+        fi
+
+        node "${SCRIPTS_DIR}/precompEcdsa.mjs" "${OUTPUTS_DIR}/prover_inputs.json" > /dev/null 2>&1
+
+        cd "${INPUTS_DIR}"
+        set_hash mdl.cbor claims.json device.prv issuer.prv issuer_certs.pem "$(relative_path "${OUTPUTS_DIR}/prover_inputs.json")"
+
+        cd "${ROOT_DIR}"
+    fi
+}
+
+###############################################################################
+#   Copy all the required files to the destination directory
+###############################################################################
+copy_artifacts() {
+    echo "Copying files to ${COPY_DEST}..."
+
+    rm -rf "${COPY_DEST}"
+    mkdir -p "${COPY_DEST}"
+    cd "${COPY_DEST}"
+
+    if [ "${CONFIG[credtype]}" == 'jwt' ]; then
+        CRED_FILE="${INPUTS_DIR}/token.jwt"
+    elif [ "${CONFIG[credtype]}" == 'mdl' ]; then
+        CRED_FILE="${INPUTS_DIR}/mdl.cbor"
+        cp "${PROVER_INPUTS_FILE}" "${PROVER_AUX_FILE}" .
+    fi
+
+    cp \
+        "${CONFIG_FILE}" \
+        "${OUTPUTS_DIR}/main_c.r1cs" \
+        "${OUTPUTS_DIR}/circom/main_js/main.wasm" \
+        "${OUTPUTS_DIR}/circom/io_locations.sym" \
+        "${INPUTS_DIR}/issuer.pub" \
+        "${INPUTS_DIR}/proof_spec.json" \
+        "${CRED_FILE}" \
+        .
     
-    # generate the prover inputs
-    cargo run --release --bin prepare-prover-input -- --config ${CONFIG_FILE} --mdl ${MDL_FILE} --prover_inputs ${PROVER_INPUTS_FILE} --prover_aux ${PROVER_AUX_FILE} 2>> ${LOG_FILE}
-    if [ $? -ne 0 ]; then
-        echo "Error running prepare_prover_input"
-        exit 1
+    if [ "${CONFIG[device_bound]}" -eq 1 ]; then
+        cp "${INPUTS_DIR}/device.pub" "${INPUTS_DIR}/device.prv" .
     fi
 
-    # extract key and signature from prover_inputs.json and add ecdsa precomputation and hash
-    node ${ROOT_DIR}/scripts/precompEcdsa.mjs ${OUTPUTS_DIR}/prover_inputs.json
+    cd "${ROOT_DIR}"
+}
 
-    cd ${ROOT_DIR}
-fi
+###############################################################################
+#   Utility functions
+###############################################################################
 
-echo "Copying files to ${COPY_DEST}..."
+green() {
+    echo -e "\033[0;32m$1\033[0m"
+}
 
-# Copy files needed for zksetup, prove, etc..
-R1CS_FILE=${OUTPUTS_DIR}/main_c.r1cs
-WIT_GEN_FILE=${OUTPUTS_DIR}/circom/main_js/main.wasm
-SYM_FILE=${OUTPUTS_DIR}/circom/io_locations.sym
-CONFIG_FILE=${INPUTS_DIR}/config.json
-ISSUER_KEY_FILE=${INPUTS_DIR}/issuer.pub
-PROOF_SPEC_FILE=${INPUTS_DIR}/proof_spec.json
-DEVICE_PUB_FILE=${INPUTS_DIR}/device.pub
-DEVICE_PRV_FILE=${INPUTS_DIR}/device.prv
-if [ ${CREDTYPE} == 'jwt' ]; then
-    CRED_FILE=${INPUTS_DIR}/token.jwt
-elif [ ${CREDTYPE} == 'mdl' ]; then 
-    CRED_FILE=${INPUTS_DIR}/mdl.cbor
-fi
+log() {
+    echo -e "\n$*" | tee -a "${LOG_FILE}"
+}
 
-rm -rf ${COPY_DEST}
-mkdir -p ${COPY_DEST}
-cp ${R1CS_FILE} ${COPY_DEST}/  
-cp ${WIT_GEN_FILE} ${COPY_DEST}/ 
-cp ${SYM_FILE} ${COPY_DEST}/
-cp ${CONFIG_FILE} ${COPY_DEST}/
-cp ${ISSUER_KEY_FILE} ${COPY_DEST}/
-cp ${CRED_FILE} ${COPY_DEST}/
-cp ${DEVICE_PUB_FILE} ${COPY_DEST}/ || true     # Optional file for JWTs
-cp ${DEVICE_PRV_FILE} ${COPY_DEST}/ || true     # Optional file for JWTs
-cp ${PROOF_SPEC_FILE} ${COPY_DEST}/
-if [ ${CREDTYPE} == 'mdl' ]; then 
-    cp ${PROVER_INPUTS_FILE} ${COPY_DEST}/
-    cp ${PROVER_AUX_FILE} ${COPY_DEST}/
-fi
+assert_path() {
+    for path in "$@"; do
+        [ -e "$path" ] || error "Required path not found: $path"
+    done
+}
 
-cd scripts
-echo "Done."
+error() {
+    local msg="$1"
+    local code="${2:-1}"
+    local script="$SCRIPT_NAME"
+
+    local line_trace=""
+    local n="${#BASH_LINENO[@]}"
+    for (( i = 0; i < n - 1; i++ )); do
+        [[ -n "$line_trace" ]] && line_trace+=":"
+        line_trace+="${BASH_LINENO[$i]}"
+    done
+
+    echo -e "\n\033[41;97m Error (${script}:${line_trace}): \033[0m $msg\n" >&2
+    exit "$code"
+}
+
+fix_symlink() {
+    local link_path="$1"
+    local target_path="$2"
+
+    if [ -f "$link_path" ]; then
+        echo "Detected broken symlink at $link_path"
+        rm -f "$link_path"
+
+        if [[ "$OS" == "Windows_NT" || "$(uname -o 2>/dev/null)" == "Msys" ]]; then
+            echo "Creating Windows junction..."
+            cmd //c "mklink /J $(cygpath -wa "$link_path") $(cygpath -wa "$target_path")"
+            git update-index --assume-unchanged "$link_path"
+        else
+            echo "Creating Linux symlink..."
+            ln -s "$target_path" "$link_path"
+        fi
+    fi
+
+    if [ ! -d "$link_path" ]; then
+        error "Expected directory symlink/junction at: $link_path"
+    fi
+}
+
+relative_path() {
+    realpath --relative-to="$(pwd)" "$1"
+}
+
+json_get() {
+    local -r json_file=$(relative_path "$1")
+    [ -f "$json_file" ] || error "JSON file not found: $json_file"
+    local key="$2"
+    # Python converts booleans to title case (True/False), so we have to convert booleans back to lowercase
+    python3 -c "import json;val = json.load(open('$json_file')).get('$key', '');print(str(val).lower() if isinstance(val, bool) else val)" 2>/dev/null
+}
+
+prune() {
+
+    [ -z "$PRUNE" ] && return 0
+
+    echo -e "\nPruning intermediate artifacts..."
+
+    local before after saved
+
+    before=$(du -s "${ROOT_DIR}" | awk '{print $1}')
+
+    rm -rf "${OUTPUTS_DIR}"
+    rm -rf "${INPUTS_DIR:?}"/!(*.json)
+
+    # Optional: clean cargo artifacts
+    # cd "${ROOT_DIR}/mdl-tools" && cargo clean
+
+    after=$(du -s "${ROOT_DIR}" | awk '{print $1}')
+    saved=$((before - after))
+
+    echo "✂️ Reclaimed:       $((saved / 1024)) MB"
+}
+
+files_changed() {
+    local files=("$@")
+
+    # If any of the files are missing, consider them changed
+    for f in "${files[@]}"; do
+        [[ -f "$f" ]] || return 0
+    done
+
+    # Generate current hash file
+    local -r current_hash_file=$(hash_files "${files[@]}")
+    local saved_hash_file="${current_hash_file%.current}"
+
+    # Compare hash files
+    if [[ ! -f "$saved_hash_file" ]] || ! cmp -s "$current_hash_file" "$saved_hash_file"; then
+        return 0 # Files have changed
+    else
+        rm "$current_hash_file"
+        return 1 # Files have not changed
+    fi
+}
+
+hash_files() {
+    local files=("$@")
+    # Generate hash ID from sorted file paths
+    local -r hash_id=$(printf "%s\n" "${files[@]}" | sort -u | sha256sum | awk '{print substr($1,1,12)}')
+    local hash_file="${OUTPUTS_DIR}/${hash_id}.sha256.current"
+    sha256sum "${files[@]}" | sort -u > "$hash_file"
+    echo "$hash_file"
+}
+
+set_hash() {
+    local files=("$@")
+    local current
+    current=$(hash_files "${files[@]}")
+    mv "$current" "${current%.current}" # Rename to remove .current suffix
+}
+
+SECONDS=0
+main "$@"
+green "\n✅ Done: $SCRIPT_NAME $NAME in ${SECONDS}s"

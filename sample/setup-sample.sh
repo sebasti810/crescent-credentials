@@ -1,29 +1,30 @@
-#!/bin/bash
+#!/usr/bin/bash
+#
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
+#
+
 set -e
+set -x
+
 
 # usage: setup-sample.sh
 
-# setup client_helper project
-cd client_helper
-./setup_client_helper.sh
-cargo build --release
-cd ..
+./client_helper/setup_client_helper.sh &
+./issuer/setup_issuer.sh &
+./verifier/setup_verifier.sh &
+wait
 
-# setup issuer project
-cd issuer
-./setup_issuer.sh
-cargo build --release
-cd ..
+./client/setup_client.sh &
+cargo build --release &
+wait
 
-# setup verifier project
-cd verifier
-./setup_verifier.sh
-cargo build --release
-cd ..
+mv target/release/crescent-sample-client-helper.exe client_helper/crescent-sample-client-helper.exe
+mv target/release/crescent-sample-issuer.exe issuer/crescent-sample-issuer.exe
+mv target/release/crescent-sample-verifier.exe verifier/crescent-sample-verifier.exe
+rm -rf target
 
-# setup client project
 cd client
-./setup_client.sh
 npm run build:debug
 
 # Create json file with base64 encoded mdoc and device private key

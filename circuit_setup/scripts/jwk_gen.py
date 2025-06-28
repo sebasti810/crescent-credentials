@@ -1,7 +1,8 @@
+#!/usr/bin/python3
+#
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
-
-#!/usr/bin/python3
+#
 
 # Depends on python-jwt:
 #   pip install python_jwt
@@ -22,7 +23,7 @@
 # Inspect public RSA key with
 #   openssl rsa -inform PEM -text -noout -in test.pub -pubin
 
-import python_jwt as jwt, jwcrypto.jwk as jwk, datetime
+import jwcrypto.jwk as jwk, datetime
 import sys, os
 
 def usage():

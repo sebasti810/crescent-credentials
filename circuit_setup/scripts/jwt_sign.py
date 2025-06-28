@@ -1,7 +1,8 @@
+#!/usr/bin/python3
+#
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
-
-#!/usr/bin/python3
+#
 
 # pip install python_jwt
 # https://pypi.org/project/python-jwt/
@@ -66,7 +67,7 @@ with open(sys.argv[1], 'r') as file:
 # If a device public key was provided, add it to the claims, in the format expected by 
 # Crescent.  This is currently a custom format, but ideally would be a 'cnf' claim
 # https://datatracker.ietf.org/doc/html/rfc7800#section-3.2
-if sys.argv[4] is not None: 
+if len(sys.argv) > 4 and sys.argv[4] is not None: 
     print("Adding device public key to claims")
     with open(sys.argv[4], "rb") as f:
         device_key_bytes = f.read()

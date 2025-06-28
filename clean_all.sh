@@ -1,14 +1,22 @@
-#!/bin/bash
+#!/usr/bin/bash
+#
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
+#
+
+# Enable glob pattern matching
+shopt -s extglob
 
 # clean Rust targets
-for d in circuit_setup/mdl-tools creds ecdsa-pop sample/verifier sample/issuer sample/client_helper sample/setup_service; do
+for d in circuit_setup/mdl-tools creds ecdsa-pop sample; do
   (cd $d && cargo clean && rm -f Cargo.lock)
 done
 
+
 # remove generated files
-find creds/test-vectors -mindepth 1 ! -name README.md -exec rm -rf {} +
-find circuit_setup/inputs -type f ! -iname 'README.md' ! -name '*.json' -delete
-find circuit_setup/generated_files -mindepth 1 ! -path 'circuit_setup/generated_files/README.md' -exec rm -rf {} +
+rm -rf circuit_setup/inputs/*/!(*.json)
+rm -rf circuit_setup/generated_files/!(README.md)
+rm -rf creds/test-vectors/!(README.md)
 
 # clean wasm
 rm -rf creds/pkg

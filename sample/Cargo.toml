@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "client_helper", 
+    "issuer",
+    "verifier"
+]
