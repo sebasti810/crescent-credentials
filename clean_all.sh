@@ -8,10 +8,7 @@
 shopt -s extglob
 
 # clean Rust targets
-for d in circuit_setup/mdl-tools creds ecdsa-pop sample; do
-  (cd $d && cargo clean && rm -f Cargo.lock)
-done
-
+cargo clean
 
 # remove generated files
 rm -rf circuit_setup/inputs/*/!(*.json)

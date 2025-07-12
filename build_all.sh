@@ -7,6 +7,9 @@
 set -e
 # set -x
 
+cd "$(dirname "${BASH_SOURCE[0]}")"
+readonly BIN=$(pwd)/target/release
+
 SECONDS=0
 
 # Check for "trim" argument to have script clean extraneous artifacts
@@ -21,21 +24,25 @@ RELEASE_FLAG="--release"
 
 git submodule update --init --recursive
 
+# Buid all subproject to ./target/release
+cargo build --release --features print-trace
+
 # Circuit setup
 # Generates circom circuits and artifacts in circuit_setup/generated_files/
 # Final output is copied to creds/test-vectors/[mdl1, rs256, rs256-sd, rs256-db]
 # The setup scripts are run in parallel for each circuit type to take advantage of multiple CPU cores
 #   as circuit generation is CPU intensive but single-threaded.
 # rm -rf circuit_setup/generated_files/!(README.md) creds/test-vectors/!(README.md)
-cd circuit_setup/scripts
+pushd circuit_setup/scripts
 ./run_setup.sh mdl1 &
 ./run_setup.sh rs256 &
 ./run_setup.sh rs256-sd &
 ./run_setup.sh rs256-db &
 wait
+popd
 
 # Ensure the output directories exist
-cd ../../creds
+pushd creds
 for d in test-vectors/rs256 test-vectors/rs256-sd test-vectors/rs256-db test-vectors/mdl1; do
   if [ ! -d "$d" ]; then
     echo "❌ Error: Missing directory creds/$d" >&2
@@ -48,16 +55,8 @@ if [ "$do_trim" = true ]; then
   rm -rf ../circuit_setup/generated_files/!(README.md)
 fi
 
-# green "Setup completed in $SECONDS seconds" # 620 317
-# read -n 1 -s -r -p "Press any key to continue..."
-# SECONDS=0
 
-# cd creds
-cargo build $RELEASE_FLAG --features print-trace --bin crescent
-mkdir -p bin
-cp -f ./target/release/crescent.exe bin/crescent.exe
-
-crescent=./bin/crescent.exe
+crescent="${BIN}/crescent-cli.exe"
 
 if [ "$do_trim" = true ]; then
   echo "Cleaning up build artifacts..."
@@ -84,7 +83,6 @@ for name in "${!LABEL_COLORS[@]}"; do
 done
 
 wait
-
 
 #
 # Sample setup

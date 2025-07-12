@@ -1,6 +1,7 @@
 .vscode/
 target/
 Cargo.lock
+bin/
 
 # ignore test vectors, but not the README
 creds/test-vectors

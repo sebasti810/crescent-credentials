@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "creds",
+    "sample/client_helper", 
+    "sample/issuer",
+    "sample/verifier",
+    "sample/setup_service",
+    "circuit_setup/mdl-tools"
+]
+
+[profile.release]
+opt-level = 3
+
+[profile.dev.package."crescent-sample-client-helper"]
+opt-level = 3               # optimize dependencies, even in dev builds
+debug-assertions = false    # We need this to work around a bug in Wasmer
+
+[profile.dev.package."crescent-sample-verifier"]
+opt-level = 3               # optimize dependencies, even in dev builds
+debug-assertions = false    # We need this to work around a bug in Wasmer
+
+[profile.dev.package."crescent-sample-issuer"]
+# empty
+
+[profile.dev.package."crescent-sample-setup-service"]
+# empty
+
+[profile.dev.package."crescent"]
+# empty
