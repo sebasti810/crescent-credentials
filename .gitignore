@@ -1,5 +1,5 @@
 .vscode/
-target/
+/target/
 Cargo.lock
 bin/
 
@@ -7,8 +7,7 @@ bin/
 creds/test-vectors
 !creds/test-vectors/README
 
-
-circuit_setup/circuits-mdl/circomlib
+# ignore all files in inputs except the JSON files
 circuit_setup/inputs/*/**
 !circuit_setup/inputs/*/*.json
 
@@ -18,7 +17,9 @@ sample/issuer/keys/
 sample/client/node_modules
 sample/client/mdl.json
 sample/client/dist
+sample/client/.env
 sample/client_helper/data
 sample/verifier/data
 
+# sample output folder created by docker build
 crescent-extension

@@ -7,8 +7,12 @@
 # Enable glob pattern matching
 shopt -s extglob
 
+# cd to this script's directory so we can run it from any location
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
 # clean Rust targets
 cargo clean
+rm ./Cargo.lock
 
 # remove generated files
 rm -rf circuit_setup/inputs/*/!(*.json)
@@ -19,6 +23,5 @@ rm -rf creds/test-vectors/!(README.md)
 rm -rf creds/pkg
 
 # clean sample
-cd sample && rm -rf client_helper/data verifier/data issuer/.well-known issuer/keys
-cd client && npm run clean
-cd ../..
+./sample/clean-sample.sh
+

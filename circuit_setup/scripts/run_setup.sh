@@ -99,14 +99,7 @@ setup() {
         error "Algorithm (alg) not found in config.json."
     fi
 
-    local msg=""
-    msg+="┌─────────────────────────────────────────────┐"$'\n'
-    msg+="│ Name:                   $NAME"$'\n'
-    msg+="│ Credential type:        ${CONFIG[credtype]}"$'\n'
-    msg+="│ Credential algorithm:   ${CONFIG[alg]}"$'\n'
-    msg+="│ Device bound:           ${CONFIG[device_bound]}"$'\n'
-    msg+="└─────────────────────────────────────────────┘"
-    echo "$msg"
+    blue "Name: $NAME | Credential type: ${CONFIG[credtype]} | Credential algorithm: ${CONFIG[alg]} | Device bound: ${CONFIG[device_bound]}"
 
     if [[ ${CONFIG[credtype]} == "mdl" ]]; then
         readonly CIRCOM_SRC_DIR="${CIRCUIT_SETUP}/circuits-mdl"
@@ -144,12 +137,14 @@ generate_keys() {
             echo "${NAME}: Creating issuer and device keys and JWT"
             python3 "${scripts_dir}"/jwk_gen.py "${CONFIG[alg]}" issuer.prv issuer.pub
             python3 "${scripts_dir}"/jwk_gen.py ES256 device.prv device.pub
+            python3 "${scripts_dir}"/jwt_sign_og.py claims.json issuer.prv token_og.jwt device.pub
             python3 "${scripts_dir}"/jwt_sign.py claims.json issuer.prv token.jwt device.pub
             save_file_state "${jwt_db_files[@]}"
 
         elif [[ ${CONFIG[device_bound]} == 0 ]] && have_files_changed "${jwt_files[@]}"; then
             echo "${NAME}: Creating issuer keys and JWT"
             python3 "${scripts_dir}"/jwk_gen.py "${CONFIG[alg]}" issuer.prv issuer.pub
+            python3 "${scripts_dir}"/jwt_sign_og.py claims.json issuer.prv token_og.jwt;
             python3 "${scripts_dir}"/jwt_sign.py claims.json issuer.prv token.jwt;
             save_file_state "${jwt_files[@]}"
 
@@ -191,12 +186,12 @@ compile_circuit() {
         circuit_inputs+=("$file")
     done < <(find "${CIRCOM_DIR}" -type f -name '*.circom' -print0)
 
-    pushd "$CIRCOM_DIR"
+    pushd "$CIRCOM_DIR" > /dev/null
     if ! have_files_changed "${circuit_inputs[@]}"; then
         green "${NAME}: No changes in circuit inputs, skipping compilation."
         return 0
     fi
-    popd
+    popd > /dev/null
 
     green "${NAME}: Generating ${NAME}_main.circom..."
 
@@ -243,11 +238,10 @@ generate_mdl() {
         return 0
     fi
 
-        PROVER_INPUTS_FILE=${OUTPUTS_DIR}/prover_inputs.json
-        PROVER_AUX_FILE=${OUTPUTS_DIR}/prover_aux.json
+    PROVER_INPUTS_FILE=${OUTPUTS_DIR}/prover_inputs.json
+    PROVER_AUX_FILE=${OUTPUTS_DIR}/prover_aux.json
 
-
-        cd "${INPUTS_DIR}"
+    cd "${INPUTS_DIR}"
 
     local mdl_gen_file=(
         mdl.cbor claims.json device.prv issuer.prv issuer_certs.pem "${OUTPUTS_DIR}/prover_inputs.json" 
@@ -255,36 +249,36 @@ generate_mdl() {
     )
 
     if ! have_files_changed "${mdl_gen_file[@]}"; then
-            green "No changes in mDL inputs, skipping generation."
-            return 0
-        fi
+        green "No changes in mDL inputs, skipping generation."
+        return 0
+    fi
 
-        log "=== Generating mDL ==="
-        local mdl_file=${INPUTS_DIR}/mdl.cbor
-        local claims_file=${INPUTS_DIR}/claims.json
-        local device_priv_key_file=${INPUTS_DIR}/device.prv
-        local issuer_priv_key_file=${INPUTS_DIR}/issuer.prv
-        local issuer_certs_file=${INPUTS_DIR}/issuer_certs.pem
+    log "=== Generating mDL ==="
+    local mdl_file=${INPUTS_DIR}/mdl.cbor
+    local claims_file=${INPUTS_DIR}/claims.json
+    local device_priv_key_file=${INPUTS_DIR}/device.prv
+    local issuer_priv_key_file=${INPUTS_DIR}/issuer.prv
+    local issuer_certs_file=${INPUTS_DIR}/issuer_certs.pem
 
     cd "${CIRCUIT_SETUP}"
 
-    if [ ! -f ./target/release/mdl-gen ] || [ ! -f ./target/release/prepare-prover-input ]; then
+    # Ensure mdl-gen and prepare-prover-input are built
+    if [ ! -f "${BIN}"/mdl-gen ] || [ ! -f "${BIN}"/prepare-prover-input ]; then
         echo "Building mdl-gen and prepare-prover-input..."
         cargo build -p mdl-tools --release
     fi
-    
 
-    if ! ${BIN}/mdl-gen --claims "${claims_file}" --device_priv_key "${device_priv_key_file}" --issuer_private_key "${issuer_priv_key_file}" --issuer_x5chain "${issuer_certs_file}" --output "${mdl_file}" 2>> "${LOG_FILE}"; then
-            error "Error running mdl-gen"
-        fi
+    if ! "${BIN}"/mdl-gen --claims "${claims_file}" --device_priv_key "${device_priv_key_file}" --issuer_private_key "${issuer_priv_key_file}" --issuer_x5chain "${issuer_certs_file}" --output "${mdl_file}" 2>> "${LOG_FILE}"; then
+        error "Error running mdl-gen"
+    fi
 
-    if ! ${BIN}/prepare-prover-input --config "${CONFIG_FILE}" --mdl "${mdl_file}" --prover_inputs "${PROVER_INPUTS_FILE}" --prover_aux "${PROVER_AUX_FILE}" 2>> "${LOG_FILE}"; then
-            error "Error running prepare_prover_input"
-        fi
+    if ! "${BIN}"/prepare-prover-input --config "${CONFIG_FILE}" --mdl "${mdl_file}" --prover_inputs "${PROVER_INPUTS_FILE}" --prover_aux "${PROVER_AUX_FILE}" 2>> "${LOG_FILE}"; then
+        error "Error running prepare_prover_input"
+    fi
 
-        node "${SCRIPTS_DIR}/precompEcdsa.mjs" "${OUTPUTS_DIR}/prover_inputs.json" > /dev/null 2>&1
+    node "${SCRIPTS_DIR}/precompEcdsa.mjs" "${OUTPUTS_DIR}/prover_inputs.json" > /dev/null 2>&1
 
-        cd "${INPUTS_DIR}"
+    cd "${INPUTS_DIR}"
     save_file_state "${mdl_gen_file[@]}"
 
     cd "${CIRCUIT_SETUP}"
@@ -331,6 +325,10 @@ copy_artifacts() {
 
 green() {
     echo -e "\033[0;32m$1\033[0m"
+}
+
+blue () {
+    echo -e "\033[0;34m$1\033[0m"
 }
 
 log() {

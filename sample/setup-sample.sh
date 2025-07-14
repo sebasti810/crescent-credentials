@@ -7,7 +7,6 @@
 # usage: setup-sample.sh
 
 set -e
-set -x
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 readonly ROOT_DIR=$(realpath ..)
@@ -21,10 +20,10 @@ wait
 
 cargo build --release --features print-trace
 mkdir -p ./client_helper/bin ./issuer/bin ./verifier/bin ./setup_service/bin
-cp ${BIN}/crescent-sample-client-helper.exe client_helper/bin/crescent-sample-client-helper.exe
-cp ${BIN}/crescent-sample-issuer.exe issuer/bin/crescent-sample-issuer.exe
-cp ${BIN}/crescent-sample-verifier.exe verifier/bin/crescent-sample-verifier.exe
-cp ${BIN}/crescent-sample-setup-service.exe setup_service/bin/crescent-sample-setup-service.exe
+cp "${BIN}"/crescent-sample-client-helper.exe client_helper/bin/crescent-sample-client-helper.exe
+cp "${BIN}"/crescent-sample-issuer.exe issuer/bin/crescent-sample-issuer.exe
+cp "${BIN}"/crescent-sample-verifier.exe verifier/bin/crescent-sample-verifier.exe
+cp "${BIN}"/crescent-sample-setup-service.exe setup_service/bin/crescent-sample-setup-service.exe
 
 
 ./client/setup_client.sh

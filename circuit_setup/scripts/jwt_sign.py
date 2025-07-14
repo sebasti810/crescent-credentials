@@ -4,16 +4,10 @@
 # Licensed under the MIT license.
 #
 
-# pip install python_jwt
-# https://pypi.org/project/python-jwt/
-
-
 # The registry of supported algorithms in JWS is found here:
 #    https://www.iana.org/assignments/jose/jose.xhtml
 # JWT: https://www.rfc-editor.org/rfc/rfc7519
 # JWS: https://www.rfc-editor.org/rfc/rfc7515
-# python JWT docs: https://jwcrypto.readthedocs.io
-# python JWT Source: https://github.com/latchset/jwcrypto
 
 import sys, os, json, datetime, time
 from jwcrypto import jwt, jwk
@@ -104,7 +98,6 @@ print("Verifying... ", end="")
 try:
     verified_token = jwt.JWT(jwt=new_jwt, key=issuer_key.public(), algs=['RS256', 'ES256', 'ES256K'])
     verified_token.validate(issuer_key.public())
-
     claims = json.loads(verified_token.claims)
     if int(time.time()) >= claims.get('exp'):
         print("Token signature is valid, but token is expired")
