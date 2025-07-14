@@ -27,7 +27,7 @@ if ($DATA_AND_BUILD); then
 fi
 echo "Cleaned client_helper project"
 
-rm -fr ./issuer/data ./issuer/keys ./issuer/bin
+rm -fr ./issuer/data ./issuer/keys ./issuer/.well-known ./issuer/bin
 if ($DATA_AND_BUILD); then
     ( cd ./issuer && cargo clean )
 fi

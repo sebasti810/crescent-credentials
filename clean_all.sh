@@ -12,7 +12,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # clean Rust targets
 cargo clean
-rm ./Cargo.lock
+rm -f ./Cargo.lock
 
 # remove generated files
 rm -rf circuit_setup/inputs/*/!(*.json)

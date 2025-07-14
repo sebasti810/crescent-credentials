@@ -137,14 +137,12 @@ generate_keys() {
             echo "${NAME}: Creating issuer and device keys and JWT"
             python3 "${scripts_dir}"/jwk_gen.py "${CONFIG[alg]}" issuer.prv issuer.pub
             python3 "${scripts_dir}"/jwk_gen.py ES256 device.prv device.pub
-            python3 "${scripts_dir}"/jwt_sign_og.py claims.json issuer.prv token_og.jwt device.pub
             python3 "${scripts_dir}"/jwt_sign.py claims.json issuer.prv token.jwt device.pub
             save_file_state "${jwt_db_files[@]}"
 
         elif [[ ${CONFIG[device_bound]} == 0 ]] && have_files_changed "${jwt_files[@]}"; then
             echo "${NAME}: Creating issuer keys and JWT"
             python3 "${scripts_dir}"/jwk_gen.py "${CONFIG[alg]}" issuer.prv issuer.pub
-            python3 "${scripts_dir}"/jwt_sign_og.py claims.json issuer.prv token_og.jwt;
             python3 "${scripts_dir}"/jwt_sign.py claims.json issuer.prv token.jwt;
             save_file_state "${jwt_files[@]}"
 

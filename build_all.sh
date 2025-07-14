@@ -21,7 +21,6 @@ git submodule update --init --recursive
 
 # Build all subproject to ./target/release
 cargo build $RELEASE_FLAG --features print-trace
-RUSTFLAGS="-A unused-imports -A unused-assignments -A unused-variables --cfg getrandom_backend=\"wasm_js\"" cargo build -p crescent --lib --release --target wasm32-unknown-unknown --no-default-features --features wasm
 
 # Circuit setup
 # Generates circom circuits and artifacts in circuit_setup/generated_files/
@@ -87,4 +86,4 @@ cd ../sample
 # Node must be available for the .js scripts to be executed
 ./setup-sample.sh
 
-green "Sample completed in $SECONDS seconds" # 773 620
+echo -e "\033[0;32mSample completed in $SECONDS seconds\033[0m"
