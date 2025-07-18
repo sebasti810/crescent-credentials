@@ -8,35 +8,36 @@ set -e
 shopt -s extglob
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
-readonly BIN=$(pwd)/target/release
+readonly CRESCENT_ENV=${CRESCENT_ENV:-release}
+[[ "$CRESCENT_ENV" =~ ^(release|debug)$ ]] || { echo "Invalid CRESCENT_ENV: $CRESCENT_ENV" >&2; exit 1; }
+RELEASE_FLAG=$([[ "$CRESCENT_ENV" == "debug" ]] && echo "" || echo "--release")
+BIN=$(pwd)/target/${CRESCENT_ENV}
 
-# Check for required commands
-check_prereq() {
-  local cmd="$1"
-  if ! command -v "$cmd" &> /dev/null; then
-    echo -e "\033[0;31m❌ Error: '$cmd' is required but not installed or not in PATH.\033[0m" >&2
-    missing=true
-  fi
+
+# Check for required shell commands
+check_prereqs() {
+  for cmd in "$@"; do
+    if ! command -v "$cmd" &> /dev/null; then
+      echo -e "\033[0;31m❌ Error: '$cmd' is required but not installed or not in PATH.\033[0m" >&2
+      missing=true
+    fi
+  done
 }
 
-check_pip_pkg() {
-  local pkg="$1"
-  if ! python -c "import $pkg" &>/dev/null; then
-    echo -e "\033[0;31m❌ Error: Python package '$pkg' is not installed.\033[0m" >&2
-    missing=true
-  fi
+# Check for required Python packages
+check_pip_pkgs() {
+  for pkg in "$@"; do
+    if ! python -c "import $pkg" &>/dev/null; then
+      echo -e "\033[0;31m❌ Error: Python package '$pkg' is not installed.\033[0m" >&2
+      missing=true
+    fi
+  done
 }
 
 echo "🔍 Checking prerequisites..."
-check_prereq node
-check_prereq npm
-check_prereq python
-check_prereq circom
-check_prereq rustc
-check_prereq cargo
-check_prereq ssh
-check_pip_pkg jwcrypto
-check_pip_pkg cbor2
+check_prereqs node npm python circom rustc cargo ssh
+check_pip_pkgs jwcrypto cbor2
+
 
 # halt if any prerequisites are missing
 if [ "${missing:-false}" = true ]; then
@@ -44,8 +45,6 @@ if [ "${missing:-false}" = true ]; then
   exit 1
 fi
 
-
-RELEASE_FLAG="--release"
 SECONDS=0
 
 # Check for "trim" argument to have script clean extraneous artifacts
@@ -54,15 +53,32 @@ do_trim=false; for arg in "$@"; do [[ "$arg" == "trim" ]] && do_trim=true && bre
 
 git submodule update --init --recursive
 
-# Build all subproject to ./target/release
+
+# 241 seconds to build individual crates
+
+
+# pushd creds
+# cargo build $RELEASE_FLAG --features print-trace
+# popd
+
+# pushd sample
+# cargo build $RELEASE_FLAG
+# popd
+
+# pushd circuit_setup/mdl-tools
+# cargo build $RELEASE_FLAG
+# popd
+
 cargo build $RELEASE_FLAG --features print-trace
+
+echo -e "\033[0;32mBuild-all completed in $SECONDS seconds\033[0m"
+exit 0
 
 # Circuit setup
 # Generates circom circuits and artifacts in circuit_setup/generated_files/
 # Final output is copied to creds/test-vectors/[mdl1, rs256, rs256-sd, rs256-db]
 # The setup scripts are run in parallel for each circuit type to take advantage of multiple CPU cores
 #   as circuit generation is CPU intensive but single-threaded.
-# rm -rf circuit_setup/generated_files/!(README.md) creds/test-vectors/!(README.md)
 pushd circuit_setup/scripts > /dev/null
 ./run_setup.sh mdl1 &
 ./run_setup.sh rs256 &
