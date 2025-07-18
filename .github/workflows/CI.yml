@@ -39,7 +39,7 @@ jobs:
           sudo apt install -y python3-pip nodejs
           curl --proto '=https' --tlsv1.3 -sSf https://sh.rustup.rs | sh -s -- -y
           source $HOME/.cargo/env
-          pip install jwcrypto
+          pip install jwcrypto cbor2
           git clone https://github.com/iden3/circom.git
           cd circom
           git checkout v2.1.6
@@ -48,7 +48,6 @@ jobs:
           export PATH=$PATH:~/.cargo/bin
           cd ..
           git submodule update --init --recursive
-          pip install git+https://github.com/peppelinux/pyMDOC-CBOR.git
 
       - name: Run circuit setup for rs256
         run: |

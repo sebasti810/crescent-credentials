@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "clean": "rimraf ./dist/**/*",
-    "build": "cross-env NODE_ENV=production rollup -c",
+    "build": "npm run build:release",
+    "build:release": "cross-env NODE_ENV=production rollup -c",
     "build:debug": "cross-env NODE_ENV=development rollup -c",
     "build:watch": "npm run build:debug -- -w",
     "lint": "eslint .",

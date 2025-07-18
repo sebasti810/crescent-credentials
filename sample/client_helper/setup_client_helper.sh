@@ -3,15 +3,14 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 #
-set -e
-
+set -e -o errexit
 # Change to the script's directory (which should be client_helper/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Define the source and target directories as arrays
-SOURCE_DIRS=("../../creds/test-vectors/rs256" "../../creds/test-vectors/rs256-db" "../../creds/test-vectors/mdl1")
-TARGET_DIRS=("./data/creds/jwt_corporate_1/shared" "./data/creds/jwt_sd/shared" "./data/creds/mdl_1/shared")
+SOURCE_DIRS=(../../creds/test-vectors/{rs256,rs256-db,mdl1})
+TARGET_DIRS=(./data/creds/{jwt_corporate_1/shared,jwt_sd/shared,mdl_1/shared})
 CLEANUP_DIR="./data/creds"
 
 # Remove and re-create the cleanup directory (could contain old creds)
@@ -23,6 +22,12 @@ mkdir -p "$CLEANUP_DIR"
 for i in "${!SOURCE_DIRS[@]}"; do
     SOURCE_DIR="${SOURCE_DIRS[i]}"
     TARGET_DIR="${TARGET_DIRS[i]}"
+
+    # Ensure the source directory exists
+    if [ ! -d "$SOURCE_DIR" ]; then
+        echo -e "\033[0;31mSource directory $SOURCE_DIR does not exist. Run run_setup.sh first.\033[0m"
+        exit 1
+    fi
 
     echo "Removing and re-creating $TARGET_DIR directory"
     mkdir -p "$TARGET_DIR"
