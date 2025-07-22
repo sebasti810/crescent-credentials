@@ -4,7 +4,7 @@
 # Licensed under the MIT license.
 #
 
-set -eEx -o pipefail -o errtrace
+set -eE -o pipefail -o errtrace
 shopt -s extglob globstar nullglob
 
 
