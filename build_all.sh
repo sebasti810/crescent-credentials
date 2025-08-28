@@ -35,7 +35,7 @@ check_pip_pkgs() {
 }
 
 echo "🔍 Checking prerequisites..."
-check_prereqs node npm python circom rustc cargo ssh
+check_prereqs node npm python3 circom rustc cargo ssh
 check_pip_pkgs jwcrypto cbor2
 
 
