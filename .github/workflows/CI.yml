@@ -28,6 +28,13 @@ jobs:
       - name: Check out the project
         uses: actions/checkout@v3
 
+      - name: Install Rust 1.88
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.88.0
+          override: true
+          profile: minimal
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -37,8 +44,6 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y python3-pip nodejs
-          curl --proto '=https' --tlsv1.3 -sSf https://sh.rustup.rs | sh -s -- -y
-          source $HOME/.cargo/env
           pip install jwcrypto cbor2
           git clone https://github.com/iden3/circom.git
           cd circom
