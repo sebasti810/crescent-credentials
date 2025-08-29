@@ -7,6 +7,7 @@
 # usage: setup-sample.sh
 
 set -euo pipefail
+set -x
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 readonly CRESCENT_ENV=${CRESCENT_ENV:-release}
