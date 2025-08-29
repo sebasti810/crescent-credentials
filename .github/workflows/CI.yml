@@ -34,6 +34,7 @@ jobs:
           toolchain: 1.88.0
           override: true
           profile: minimal
+          components: clippy
 
       - name: Set up Python
         uses: actions/setup-python@v4
