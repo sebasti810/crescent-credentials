@@ -28,8 +28,9 @@ rand = ">=0.8.5"
 flate2 = { version = "1.0.14" }
 num-format = { version = "0.4.3" }
 
-# Enable 'asm' feature only on x86_64 (halo2curves `asm` is x86_64-only; arm64
-# falls back to the portable field arithmetic). Original gated on non-wasm.
+# Enable 'asm' only on x86_64. halo2curves has the asm path only for x86_64,
+# on arm64 we use the normal (portable) field arithmetic. Before it was gated
+# on non-wasm.
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 halo2curves = { version = "0.8.0", features = ["asm"] }
 
