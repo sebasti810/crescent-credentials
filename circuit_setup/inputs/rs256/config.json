@@ -14,6 +14,6 @@
   "age": {
     "type": "number",
     "max_claim_byte_len": 31,
-    "timing_gadget": { "weight": 2000, "n": 200000 }
+    "timing_gadget": { "weight": 5000, "n": 500000 }
   }
 }
