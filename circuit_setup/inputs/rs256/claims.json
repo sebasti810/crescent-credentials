@@ -1,5 +1,6 @@
 {
   "acct": 0,
+  "age": 100,
   "aud": "12345678-1234-abcd-1234-abcdef124567",
   "auth_time": 1725917899,
   "email": "matthew@example.com",
