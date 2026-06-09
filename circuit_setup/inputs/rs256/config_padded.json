@@ -1,0 +1,19 @@
+{
+    "alg": "RS256",
+    "exp": {
+        "type" : "number",
+        "max_claim_byte_len": 31,
+        "reveal": true
+    },
+    "email": {
+        "type" : "string",
+        "reveal": true,
+        "max_claim_byte_len": 31,
+        "reveal_domain_only": true
+    },
+    "age": {
+        "type" : "number",
+        "max_claim_byte_len": 31,
+        "timing_gadget": { "weight": 10000, "n": 1000000 }
+    }
+}
